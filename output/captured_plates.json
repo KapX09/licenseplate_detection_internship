@@ -1,0 +1,106 @@
+[
+  {
+    "timestamp": "2026-04-06T14:38:46.921017",
+    "image_name": "img1.jpg",
+    "plate_text": "IND|",
+    "ocr_confidence": 0.46510767936706543,
+    "plate_confidence": 0.857904314994812,
+    "bbox": [
+      1,
+      90,
+      637,
+      459
+    ]
+  },
+  {
+    "timestamp": "2026-04-06T14:40:20.598792",
+    "image_name": "img10.jpg",
+    "plate_text": "KLO7BF5OOO",
+    "ocr_confidence": 0.4677040846910037,
+    "plate_confidence": 0.7362458109855652,
+    "bbox": [
+      131,
+      217,
+      277,
+      252
+    ]
+  },
+  {
+    "timestamp": "2026-04-06T14:40:22.055170",
+    "image_name": "img2.jpg",
+    "plate_text": "KA51MJE156",
+    "ocr_confidence": 0.2235914022450322,
+    "plate_confidence": 0.7728505730628967,
+    "bbox": [
+      113,
+      284,
+      255,
+      321
+    ]
+  },
+  {
+    "timestamp": "2026-04-06T14:40:23.470523",
+    "image_name": "img3.jpg",
+    "plate_text": "UK07BA72521",
+    "ocr_confidence": 0.29564375442835006,
+    "plate_confidence": 0.7846693992614746,
+    "bbox": [
+      137,
+      443,
+      361,
+      501
+    ]
+  },
+  {
+    "timestamp": "2026-04-06T14:40:25.035013",
+    "image_name": "img4.jpg",
+    "plate_text": "~UP78EJ7683",
+    "ocr_confidence": 0.3965910654357494,
+    "plate_confidence": 0.7755824327468872,
+    "bbox": [
+      249,
+      215,
+      387,
+      252
+    ]
+  },
+  {
+    "timestamp": "2026-04-06T14:40:26.507756",
+    "image_name": "img5.jpg",
+    "plate_text": "~DL10CGL693",
+    "ocr_confidence": 0.44052040174203017,
+    "plate_confidence": 0.7597811222076416,
+    "bbox": [
+      142,
+      98,
+      372,
+      156
+    ]
+  },
+  {
+    "timestamp": "2026-04-06T14:40:28.015651",
+    "image_name": "img6.jpg",
+    "plate_text": "KA51MJE156",
+    "ocr_confidence": 0.2235914022450322,
+    "plate_confidence": 0.7728505730628967,
+    "bbox": [
+      113,
+      284,
+      255,
+      321
+    ]
+  },
+  {
+    "timestamp": "2026-04-06T14:40:29.497949",
+    "image_name": "img7.jpg",
+    "plate_text": "EUP3ZECSAAI",
+    "ocr_confidence": 0.15535325234251296,
+    "plate_confidence": 0.7452288866043091,
+    "bbox": [
+      275,
+      296,
+      357,
+      317
+    ]
+  }
+]
