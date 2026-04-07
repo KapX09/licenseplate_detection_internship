@@ -2,7 +2,9 @@ ultralytics
 torch
 torchvision
 torchaudio
+tqdm
 opencv-python
 easyocr
 PyYAML
 numpy
+pytesseract
