@@ -1,9 +1,9 @@
 [
   {
-    "timestamp": "2026-04-07T20:55:45.816153",
+    "timestamp": "2026-04-08T10:50:05.217375",
     "image_name": "img10.jpg",
-    "plate_text": "MKL07BFS00Q",
-    "ocr_confidence": 0.2579230784585295,
+    "plate_text": "KLO7BF5000",
+    "ocr_confidence": 0.6,
     "plate_confidence": 0.7362458109855652,
     "bbox": [
       131,
@@ -13,10 +13,10 @@
     ]
   },
   {
-    "timestamp": "2026-04-07T20:55:47.499348",
+    "timestamp": "2026-04-08T10:50:07.771935",
     "image_name": "img2.jpg",
-    "plate_text": "K451J8156",
-    "ocr_confidence": 0.7129377288920031,
+    "plate_text": "EKAS1MJ8156",
+    "ocr_confidence": 0.6,
     "plate_confidence": 0.7728505730628967,
     "bbox": [
       113,
@@ -26,10 +26,10 @@
     ]
   },
   {
-    "timestamp": "2026-04-07T20:55:49.104296",
+    "timestamp": "2026-04-08T10:50:10.228835",
     "image_name": "img3.jpg",
-    "plate_text": "PUK07BA7252",
-    "ocr_confidence": 0.46277504632224825,
+    "plate_text": "1UK07BA7252",
+    "ocr_confidence": 0.6,
     "plate_confidence": 0.7846693992614746,
     "bbox": [
       137,
@@ -39,10 +39,23 @@
     ]
   },
   {
-    "timestamp": "2026-04-07T20:55:53.187055",
+    "timestamp": "2026-04-08T10:50:13.814364",
+    "image_name": "img4.jpg",
+    "plate_text": "UP78EJ7683",
+    "ocr_confidence": 0.6,
+    "plate_confidence": 0.7755824327468872,
+    "bbox": [
+      249,
+      215,
+      387,
+      252
+    ]
+  },
+  {
+    "timestamp": "2026-04-08T10:50:16.917041",
     "image_name": "img5.jpg",
-    "plate_text": "FDL10C64693",
-    "ocr_confidence": 0.6457033290002794,
+    "plate_text": "DL10C64693",
+    "ocr_confidence": 0.6,
     "plate_confidence": 0.7597811222076416,
     "bbox": [
       142,
@@ -52,10 +65,10 @@
     ]
   },
   {
-    "timestamp": "2026-04-07T20:55:55.012739",
+    "timestamp": "2026-04-08T10:50:21.356063",
     "image_name": "img6.jpg",
-    "plate_text": "K451J8156",
-    "ocr_confidence": 0.7129377288920031,
+    "plate_text": "EKAS1MJ8156",
+    "ocr_confidence": 0.6,
     "plate_confidence": 0.7728505730628967,
     "bbox": [
       113,
@@ -65,10 +78,10 @@
     ]
   },
   {
-    "timestamp": "2026-04-07T20:55:59.195933",
+    "timestamp": "2026-04-08T10:50:25.818921",
     "image_name": "img7.jpg",
-    "plate_text": "8UPJ28CFW1",
-    "ocr_confidence": 0.12726762924848983,
+    "plate_text": "EUP3ZECSAAI",
+    "ocr_confidence": 0.15535325234251296,
     "plate_confidence": 0.7452288866043091,
     "bbox": [
       275,
@@ -78,10 +91,10 @@
     ]
   },
   {
-    "timestamp": "2026-04-07T20:56:01.404588",
+    "timestamp": "2026-04-08T10:50:28.621823",
     "image_name": "img8.jpg",
-    "plate_text": "MTS0B8R16G",
-    "ocr_confidence": 0.31266657849413704,
+    "plate_text": "TSOBER1643",
+    "ocr_confidence": 0.6,
     "plate_confidence": 0.6884625554084778,
     "bbox": [
       0,
@@ -91,10 +104,10 @@
     ]
   },
   {
-    "timestamp": "2026-04-07T20:56:03.144540",
+    "timestamp": "2026-04-08T10:50:31.182816",
     "image_name": "img9.jpg",
-    "plate_text": "GAS01B220027",
-    "ocr_confidence": 0.23058509115047568,
+    "plate_text": "AS01BZ2002",
+    "ocr_confidence": 0.6,
     "plate_confidence": 0.7757724523544312,
     "bbox": [
       292,
