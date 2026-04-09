@@ -9,6 +9,9 @@ from paddleocr import PaddleOCR
 from pathlib import Path
 from tqdm import tqdm
 import logging
+import warnings
+
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 # ===================== CONFIG =====================
 MODEL_PATH = "models/best.pt"
@@ -18,44 +21,54 @@ INPUT_FOLDER = "test_images"
 JSON_FILE = "output/captured_plates.json"
 SAVE_ANNOTATED = True
 ANNOTATED_FOLDER = "output/annotated"
+os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
 
 # Create folders
 Path("output").mkdir(exist_ok=True)
 Path(ANNOTATED_FOLDER).mkdir(exist_ok=True)
 
-# Suppress PaddleOCR logs (since show_log is removed)
+# Suppress PaddleOCR logs
 logging.getLogger("ppocr").setLevel(logging.ERROR)
 
 # ===================== LOAD MODELS =====================
 print("Loading models...")
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+device = 'cpu'                     # Force CPU
 model = YOLO(MODEL_PATH)
 model.to(device)
 
-# PaddleOCR - optimized for Indian plates
-# print("Loading PaddleOCR...")
-# ocr = PaddleOCR(use_textline_orientation=True, lang='en', det=True, rec=True)   # lang='en' works well for Indian plates
+# Suppress logs
+import logging
+logging.getLogger("ppocr").setLevel(logging.ERROR)
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-# PaddleOCR - Fixed for PaddleOCR 3.x
 print("Loading PaddleOCR...")
 ocr = PaddleOCR(
-    use_textline_orientation=True,   # ← Replaced use_angle_cls
-    lang='en',                       # Good for Indian plates
-    # show_log=False → REMOVED (causes error in 3.x)
-    det=True,                        # Explicitly enable detection + recognition
-    rec=True
+    lang='en',
+    enable_mkldnn=False        # Fixes the oneDNN/PIR crash on CPU
 )
 
 print("Models loaded successfully!\n")
 
 # ===================== HELPER FUNCTIONS =====================
 def clean_plate_text(text):
-    """Light cleaning for Indian plates"""
+    """Improved cleaning for Indian license plates"""
     if not text:
         return ""
+    
     text = text.upper().strip()
-    text = text.replace(" ", "").replace("~", "").replace("|", "").replace("-", "").replace(".", "")
+    
+    # Remove unwanted characters
+    text = text.replace(" ", "").replace("~", "").replace("|", "").replace("-", "") \
+               .replace(".", "").replace(":", "").replace(";", "").replace(",", "")
+    
+    # Common OCR mistakes on Indian plates
+    text = text.replace("O", "0").replace("I", "1").replace("Z", "2") \
+               .replace("S", "5").replace("B", "8").replace("G", "6")
+    
+    # Keep only alphanumeric (Indian plates are like MH20EE1234, DL7CA2345, etc.)
+    text = "".join(c for c in text if c.isalnum())
+    
     return text
 
 def process_image(image_path):
@@ -79,15 +92,28 @@ def process_image(image_path):
             if crop.size == 0:
                 continue
             
-            # 2. PaddleOCR on cropped plate
-            ocr_result = ocr.ocr(crop, cls=True)
+            # 2. PaddleOCR on cropped plate (safe for 3.4.0)
+            ocr_result = ocr.ocr(crop)
             
             text = ""
             ocr_conf = 0.0
-            if ocr_result and ocr_result[0]:
+            
+            if ocr_result and ocr_result[0]:          # ocr_result[0] contains the list of lines
                 for line in ocr_result[0]:
-                    text_part = line[1][0]      # recognized text
-                    conf_part = line[1][1]      # confidence
+                    if not line or len(line) < 2:
+                        continue
+                    
+                    item = line[1]                    # This can be str or [text, conf]
+                    
+                    if isinstance(item, (list, tuple)) and len(item) >= 2:
+                        text_part = item[0]
+                        conf_part = float(item[1]) if isinstance(item[1], (int, float)) else 0.0
+                    elif isinstance(item, str):
+                        text_part = item
+                        conf_part = 0.8                   # default confidence when not returned
+                    else:
+                        continue
+                    
                     if conf_part > ocr_conf:
                         text = text_part
                         ocr_conf = conf_part
@@ -158,7 +184,7 @@ if __name__ == "__main__":
                 cv2.imwrite(os.path.join(ANNOTATED_FOLDER, f"annotated_{img_name}"), annotated)
             
             cv2.imshow(f"Result - {img_name}", annotated)
-            cv2.waitKey(0)          # Press any key to go to next image
+            cv2.waitKey(0)
             cv2.destroyAllWindows()
         
         print("\nProcessing finished! Check output/captured_plates.json")
