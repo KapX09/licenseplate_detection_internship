@@ -5,10 +5,10 @@ import datetime
 import os
 import torch
 from ultralytics import YOLO
-import easyocr
-import pytesseract
+from paddleocr import PaddleOCR
 from pathlib import Path
 from tqdm import tqdm
+import logging
 
 # ===================== CONFIG =====================
 MODEL_PATH = "models/best.pt"
@@ -23,6 +23,9 @@ ANNOTATED_FOLDER = "output/annotated"
 Path("output").mkdir(exist_ok=True)
 Path(ANNOTATED_FOLDER).mkdir(exist_ok=True)
 
+# Suppress PaddleOCR logs (since show_log is removed)
+logging.getLogger("ppocr").setLevel(logging.ERROR)
+
 # ===================== LOAD MODELS =====================
 print("Loading models...")
 
@@ -30,53 +33,40 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 model = YOLO(MODEL_PATH)
 model.to(device)
 
-# EasyOCR
-easy_reader = easyocr.Reader(['en'], gpu=True)
+# PaddleOCR - optimized for Indian plates
+# print("Loading PaddleOCR...")
+# ocr = PaddleOCR(use_textline_orientation=True, lang='en', det=True, rec=True)   # lang='en' works well for Indian plates
 
-# Tesseract OCR (make sure tesseract is installed on your system)
-print("Models loaded!\n")
+# PaddleOCR - Fixed for PaddleOCR 3.x
+print("Loading PaddleOCR...")
+ocr = PaddleOCR(
+    use_textline_orientation=True,   # ← Replaced use_angle_cls
+    lang='en',                       # Good for Indian plates
+    # show_log=False → REMOVED (causes error in 3.x)
+    det=True,                        # Explicitly enable detection + recognition
+    rec=True
+)
+
+print("Models loaded successfully!\n")
 
 # ===================== HELPER FUNCTIONS =====================
 def clean_plate_text(text):
-    """Very light cleaning"""
+    """Light cleaning for Indian plates"""
     if not text:
         return ""
     text = text.upper().strip()
     text = text.replace(" ", "").replace("~", "").replace("|", "").replace("-", "").replace(".", "")
     return text
 
-def get_best_ocr(crop):
-    """Run both EasyOCR and Tesseract and choose the better one"""
-    if crop is None or crop.size == 0:
-        return "", 0.0
-    
-    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-    
-    # EasyOCR
-    easy_results = easy_reader.readtext(gray, detail=1)
-    easy_text = easy_results[0][1] if easy_results else ""
-    easy_conf = easy_results[0][2] if easy_results else 0.0
-    
-    # Tesseract OCR
-    tess_config = '--oem 3 --psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-    tess_text = pytesseract.image_to_string(gray, config=tess_config).strip()
-    tess_conf = 0.6 if len(tess_text) > 6 else 0.3   # rough confidence estimation
-    
-    # Choose the better result
-    if len(clean_plate_text(easy_text)) > len(clean_plate_text(tess_text)):
-        return clean_plate_text(easy_text), easy_conf
-    else:
-        return clean_plate_text(tess_text), tess_conf
-
-# ===================== MAIN PROCESSING =====================
 def process_image(image_path):
     frame = cv2.imread(image_path)
     if frame is None:
+        print(f"Could not read {image_path}")
         return None, None, 0
     
     start = time.time()
     
-    # Detect plate using YOLO .pt
+    # 1. Detect plate with YOLO
     results = model(frame, conf=CONFIDENCE, iou=IOU, verbose=False)
     
     detections = []
@@ -86,13 +76,27 @@ def process_image(image_path):
             plate_conf = float(box.conf[0])
             
             crop = frame[y1:y2, x1:x2]
+            if crop.size == 0:
+                continue
             
-            # Get best text using two OCRs
-            text, ocr_conf = get_best_ocr(crop)
+            # 2. PaddleOCR on cropped plate
+            ocr_result = ocr.ocr(crop, cls=True)
+            
+            text = ""
+            ocr_conf = 0.0
+            if ocr_result and ocr_result[0]:
+                for line in ocr_result[0]:
+                    text_part = line[1][0]      # recognized text
+                    conf_part = line[1][1]      # confidence
+                    if conf_part > ocr_conf:
+                        text = text_part
+                        ocr_conf = conf_part
+            
+            clean_text = clean_plate_text(text)
             
             detections.append({
                 'bbox': (x1, y1, x2, y2),
-                'text': text,
+                'text': clean_text,
                 'ocr_conf': ocr_conf,
                 'plate_conf': plate_conf
             })
@@ -108,15 +112,15 @@ def draw_results(frame, detections):
         cv2.putText(frame, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
     return frame
 
-# ===================== RUN =====================
+# ===================== MAIN =====================
 if __name__ == "__main__":
     image_files = [f for f in os.listdir(INPUT_FOLDER) 
                    if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp'))]
     
     if not image_files:
-        print("No images found in test_images folder!")
+        print(f"No images found in '{INPUT_FOLDER}' folder!")
     else:
-        print(f"Found {len(image_files)} images. Running with EasyOCR + Tesseract...\n")
+        print(f"Found {len(image_files)} images. Testing with PaddleOCR...\n")
         
         for img_name in tqdm(image_files, desc="Processing"):
             img_path = os.path.join(INPUT_FOLDER, img_name)
@@ -146,14 +150,15 @@ if __name__ == "__main__":
                     with open(JSON_FILE, 'w') as f:
                         json.dump(data, f, indent=2)
                     
-                    print(f"   → Saved: {det['text']} (Conf: {det['ocr_conf']:.2f})")
+                    print(f"   → {det['text']} (OCR Conf: {det['ocr_conf']:.2f})")
             
+            # Show and save annotated image
             annotated = draw_results(frame.copy(), detections)
             if SAVE_ANNOTATED:
                 cv2.imwrite(os.path.join(ANNOTATED_FOLDER, f"annotated_{img_name}"), annotated)
             
-            cv2.imshow(f"Result: {img_name}", annotated)
-            cv2.waitKey(0)
+            cv2.imshow(f"Result - {img_name}", annotated)
+            cv2.waitKey(0)          # Press any key to go to next image
             cv2.destroyAllWindows()
         
-        print("\nProcessing completed! Check output/captured_plates.json")
+        print("\nProcessing finished! Check output/captured_plates.json")
