@@ -4,14 +4,11 @@ import json
 import datetime
 import os
 import torch
+import numpy as np
+import easyocr
 from ultralytics import YOLO
-from paddleocr import PaddleOCR
 from pathlib import Path
 from tqdm import tqdm
-import logging
-import warnings
-
-warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 # ===================== CONFIG =====================
 MODEL_PATH = "models/best.pt"
@@ -21,53 +18,62 @@ INPUT_FOLDER = "test_images"
 JSON_FILE = "output/captured_plates.json"
 SAVE_ANNOTATED = True
 ANNOTATED_FOLDER = "output/annotated"
-os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
 
-# Create folders
 Path("output").mkdir(exist_ok=True)
 Path(ANNOTATED_FOLDER).mkdir(exist_ok=True)
-
-# Suppress PaddleOCR logs
-logging.getLogger("ppocr").setLevel(logging.ERROR)
 
 # ===================== LOAD MODELS =====================
 print("Loading models...")
 
-device = 'cpu'                     # Force CPU
+device = 'cpu'
 model = YOLO(MODEL_PATH)
 model.to(device)
 
-# Suppress logs
-import logging
-logging.getLogger("ppocr").setLevel(logging.ERROR)
-warnings.filterwarnings("ignore", category=DeprecationWarning)
+print("Loading EasyOCR...")
+reader = easyocr.Reader(['en'], gpu=False)   # Set True if you have GPU
 
-print("Loading PaddleOCR...")
-ocr = PaddleOCR(
-    lang='en',
-    enable_mkldnn=False        # Fixes the oneDNN/PIR crash on CPU
-)
+print("Models loaded!\n")
 
-print("Models loaded successfully!\n")
+# ===================== SAFE PREPROCESSING =====================
+def safe_preprocess(crop):
+    """Very safe preprocessing - minimal disturbance"""
+    if crop is None or crop.size == 0:
+        return None
+    
+    # 1. Grayscale
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    
+    # 2. Resize to fixed height while keeping aspect ratio (best for OCR)
+    target_height = 200          # You can try 180 or 220 later
+    aspect = gray.shape[1] / gray.shape[0]
+    new_width = int(target_height * aspect)
+    
+    gray = cv2.resize(gray, (new_width, target_height), interpolation=cv2.INTER_CUBIC)
+    
+    # 3. Very mild sharpening (helps edges without creating noise)
+    kernel = np.array([[0, -1, 0],
+                       [-1, 5, -1],
+                       [0, -1, 0]], dtype=np.float32)
+    gray = cv2.filter2D(gray, -1, kernel)
+    
+    return gray
 
 # ===================== HELPER FUNCTIONS =====================
 def clean_plate_text(text):
-    """Improved cleaning for Indian license plates"""
+    """Safe cleaning for Indian plates"""
     if not text:
         return ""
     
     text = text.upper().strip()
-    
-    # Remove unwanted characters
     text = text.replace(" ", "").replace("~", "").replace("|", "").replace("-", "") \
-               .replace(".", "").replace(":", "").replace(";", "").replace(",", "")
+               .replace(".", "").replace(":", "").replace(";", "")
     
-    # Common OCR mistakes on Indian plates
-    text = text.replace("O", "0").replace("I", "1").replace("Z", "2") \
-               .replace("S", "5").replace("B", "8").replace("G", "6")
+    # Only safe replacements
+    text = text.replace("O", "0").replace("I", "1").replace("Z", "2")
     
-    # Keep only alphanumeric (Indian plates are like MH20EE1234, DL7CA2345, etc.)
     text = "".join(c for c in text if c.isalnum())
+    if len(text) > 12:
+        text = text[:12]
     
     return text
 
@@ -79,7 +85,7 @@ def process_image(image_path):
     
     start = time.time()
     
-    # 1. Detect plate with YOLO
+    # YOLO Plate Detection
     results = model(frame, conf=CONFIDENCE, iou=IOU, verbose=False)
     
     detections = []
@@ -92,31 +98,17 @@ def process_image(image_path):
             if crop.size == 0:
                 continue
             
-            # 2. PaddleOCR on cropped plate (safe for 3.4.0)
-            ocr_result = ocr.ocr(crop)
+            # Safe Preprocessing
+            processed = safe_preprocess(crop)
+            
+            # EasyOCR
+            results_ocr = reader.readtext(processed, detail=1, paragraph=False)
             
             text = ""
             ocr_conf = 0.0
-            
-            if ocr_result and ocr_result[0]:          # ocr_result[0] contains the list of lines
-                for line in ocr_result[0]:
-                    if not line or len(line) < 2:
-                        continue
-                    
-                    item = line[1]                    # This can be str or [text, conf]
-                    
-                    if isinstance(item, (list, tuple)) and len(item) >= 2:
-                        text_part = item[0]
-                        conf_part = float(item[1]) if isinstance(item[1], (int, float)) else 0.0
-                    elif isinstance(item, str):
-                        text_part = item
-                        conf_part = 0.8                   # default confidence when not returned
-                    else:
-                        continue
-                    
-                    if conf_part > ocr_conf:
-                        text = text_part
-                        ocr_conf = conf_part
+            if results_ocr:
+                text = results_ocr[0][1]
+                ocr_conf = results_ocr[0][2]
             
             clean_text = clean_plate_text(text)
             
@@ -146,7 +138,7 @@ if __name__ == "__main__":
     if not image_files:
         print(f"No images found in '{INPUT_FOLDER}' folder!")
     else:
-        print(f"Found {len(image_files)} images. Testing with PaddleOCR...\n")
+        print(f"Found {len(image_files)} images. Running EasyOCR with safe preprocessing...\n")
         
         for img_name in tqdm(image_files, desc="Processing"):
             img_path = os.path.join(INPUT_FOLDER, img_name)
@@ -178,7 +170,6 @@ if __name__ == "__main__":
                     
                     print(f"   → {det['text']} (OCR Conf: {det['ocr_conf']:.2f})")
             
-            # Show and save annotated image
             annotated = draw_results(frame.copy(), detections)
             if SAVE_ANNOTATED:
                 cv2.imwrite(os.path.join(ANNOTATED_FOLDER, f"annotated_{img_name}"), annotated)
