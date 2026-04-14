@@ -30,46 +30,52 @@ model = YOLO(MODEL_PATH)
 model.to(device)
 
 print("Loading EasyOCR...")
-reader = easyocr.Reader(['en'], gpu=False)   # Set True if you have GPU
+reader = easyocr.Reader(['en'], gpu=False)
 
 print("Models loaded!\n")
 
 # ===================== SAFE PREPROCESSING =====================
 def safe_preprocess(crop):
-    """Very safe preprocessing - minimal disturbance"""
     if crop is None or crop.size == 0:
         return None
-    
-    # 1. Grayscale
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-    
-    # 2. Resize to fixed height while keeping aspect ratio (best for OCR)
-    target_height = 200          # You can try 180 or 220 later
+    target_height = 200
     aspect = gray.shape[1] / gray.shape[0]
     new_width = int(target_height * aspect)
-    
     gray = cv2.resize(gray, (new_width, target_height), interpolation=cv2.INTER_CUBIC)
     
-    # 3. Very mild sharpening (helps edges without creating noise)
-    kernel = np.array([[0, -1, 0],
-                       [-1, 5, -1],
-                       [0, -1, 0]], dtype=np.float32)
+    # Mild sharpening
+    kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=np.float32)
     gray = cv2.filter2D(gray, -1, kernel)
-    
     return gray
 
-# ===================== HELPER FUNCTIONS =====================
-def clean_plate_text(text):
-    """Safe cleaning for Indian plates"""
+# ===================== SMART POST-PROCESSING RULES (Option A) =====================
+def smart_clean_plate_text(text):
     if not text:
         return ""
     
     text = text.upper().strip()
     text = text.replace(" ", "").replace("~", "").replace("|", "").replace("-", "") \
-               .replace(".", "").replace(":", "").replace(";", "")
+               .replace(".", "").replace(":", "").replace(";", "").replace(",", "")
     
-    # Only safe replacements
+    # Safe global replacements
     text = text.replace("O", "0").replace("I", "1").replace("Z", "2")
+    
+    # Indian Plate Specific Rules
+    if len(text) >= 8:
+        # Fix common number-letter confusions based on position
+        if len(text) > 8 and text[0] in "HKAU":
+            pass  # State code usually correct
+        
+        # Fix middle numbers (very common errors)
+        text = text.replace("B", "8") if "B" in text[4:] else text
+        text = text.replace("S", "5") if "S" in text else text
+        text = text.replace("4", "1") if "4" in text[2:6] else text   # often 1 misread as 4
+        text = text.replace("2", "7") if "2" in text[3:7] else text   # 7 misread as 2
+        
+        # Remove extra prefix if length is too long
+        if len(text) > 11 and text[0] in "EKMPF":
+            text = text[1:]
     
     text = "".join(c for c in text if c.isalnum())
     if len(text) > 12:
@@ -80,12 +86,10 @@ def clean_plate_text(text):
 def process_image(image_path):
     frame = cv2.imread(image_path)
     if frame is None:
-        print(f"Could not read {image_path}")
         return None, None, 0
     
     start = time.time()
     
-    # YOLO Plate Detection
     results = model(frame, conf=CONFIDENCE, iou=IOU, verbose=False)
     
     detections = []
@@ -98,19 +102,17 @@ def process_image(image_path):
             if crop.size == 0:
                 continue
             
-            # Safe Preprocessing
             processed = safe_preprocess(crop)
             
-            # EasyOCR
-            results_ocr = reader.readtext(processed, detail=1, paragraph=False)
+            ocr_results = reader.readtext(processed, detail=1, paragraph=False)
             
             text = ""
             ocr_conf = 0.0
-            if results_ocr:
-                text = results_ocr[0][1]
-                ocr_conf = results_ocr[0][2]
+            if ocr_results:
+                text = ocr_results[0][1]
+                ocr_conf = ocr_results[0][2]
             
-            clean_text = clean_plate_text(text)
+            clean_text = smart_clean_plate_text(text)
             
             detections.append({
                 'bbox': (x1, y1, x2, y2),
@@ -136,9 +138,9 @@ if __name__ == "__main__":
                    if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp'))]
     
     if not image_files:
-        print(f"No images found in '{INPUT_FOLDER}' folder!")
+        print("No images found!")
     else:
-        print(f"Found {len(image_files)} images. Running EasyOCR with safe preprocessing...\n")
+        print(f"Found {len(image_files)} images. Running Option A - Smart Rules...\n")
         
         for img_name in tqdm(image_files, desc="Processing"):
             img_path = os.path.join(INPUT_FOLDER, img_name)
@@ -168,7 +170,7 @@ if __name__ == "__main__":
                     with open(JSON_FILE, 'w') as f:
                         json.dump(data, f, indent=2)
                     
-                    print(f"   → {det['text']} (OCR Conf: {det['ocr_conf']:.2f})")
+                    print(f"   → {det['text']} (OCR: {det['ocr_conf']:.2f})")
             
             annotated = draw_results(frame.copy(), detections)
             if SAVE_ANNOTATED:
@@ -178,4 +180,4 @@ if __name__ == "__main__":
             cv2.waitKey(0)
             cv2.destroyAllWindows()
         
-        print("\nProcessing finished! Check output/captured_plates.json")
+        print("\detection using easy ocr completed!")
