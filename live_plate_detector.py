@@ -6,6 +6,7 @@ import os
 import torch
 import numpy as np
 import easyocr
+import pytesseract
 from ultralytics import YOLO
 from pathlib import Path
 from tqdm import tqdm
@@ -32,6 +33,9 @@ model.to(device)
 print("Loading EasyOCR...")
 reader = easyocr.Reader(['en'], gpu=False)
 
+print("Loading Tesseract...")
+# Make sure tesseract is installed on your system
+
 print("Models loaded!\n")
 
 # ===================== SAFE PREPROCESSING =====================
@@ -43,44 +47,49 @@ def safe_preprocess(crop):
     aspect = gray.shape[1] / gray.shape[0]
     new_width = int(target_height * aspect)
     gray = cv2.resize(gray, (new_width, target_height), interpolation=cv2.INTER_CUBIC)
-    
-    # Mild sharpening
     kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=np.float32)
     gray = cv2.filter2D(gray, -1, kernel)
     return gray
 
-# ===================== SMART POST-PROCESSING RULES (Option A) =====================
+# ===================== DUAL OCR (Option B) =====================
+def get_best_ocr(crop):
+    processed = safe_preprocess(crop)
+    if processed is None:
+        return "", 0.0
+    
+    # EasyOCR
+    easy_results = reader.readtext(processed, detail=1)
+    easy_text = easy_results[0][1] if easy_results else ""
+    easy_conf = easy_results[0][2] if easy_results else 0.0
+    
+    # Tesseract
+    tess_config = r'--oem 3 --psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+    tess_text = pytesseract.image_to_string(processed, config=tess_config).strip()
+    tess_conf = 0.65 if len(tess_text) >= 8 else 0.4
+    
+    # Choose better one
+    clean_easy = smart_clean_plate_text(easy_text)   # we'll define below
+    clean_tess = smart_clean_plate_text(tess_text)
+    
+    if len(clean_easy) >= len(clean_tess):
+        return clean_easy, easy_conf
+    else:
+        return clean_tess, tess_conf
+
 def smart_clean_plate_text(text):
+    # Same smart rules as Option A
     if not text:
         return ""
-    
     text = text.upper().strip()
     text = text.replace(" ", "").replace("~", "").replace("|", "").replace("-", "") \
-               .replace(".", "").replace(":", "").replace(";", "").replace(",", "")
-    
-    # Safe global replacements
+               .replace(".", "").replace(":", "").replace(";", "")
     text = text.replace("O", "0").replace("I", "1").replace("Z", "2")
-    
-    # Indian Plate Specific Rules
-    if len(text) >= 8:
-        # Fix common number-letter confusions based on position
-        if len(text) > 8 and text[0] in "HKAU":
-            pass  # State code usually correct
-        
-        # Fix middle numbers (very common errors)
-        text = text.replace("B", "8") if "B" in text[4:] else text
-        text = text.replace("S", "5") if "S" in text else text
-        text = text.replace("4", "1") if "4" in text[2:6] else text   # often 1 misread as 4
-        text = text.replace("2", "7") if "2" in text[3:7] else text   # 7 misread as 2
-        
-        # Remove extra prefix if length is too long
-        if len(text) > 11 and text[0] in "EKMPF":
-            text = text[1:]
-    
+    text = text.replace("B", "8") if "B" in text else text
+    text = text.replace("S", "5") if "S" in text else text
+    text = text.replace("4", "1") if "4" in text[2:6] else text
     text = "".join(c for c in text if c.isalnum())
     if len(text) > 12:
         text = text[:12]
-    
     return text
 
 def process_image(image_path):
@@ -89,7 +98,6 @@ def process_image(image_path):
         return None, None, 0
     
     start = time.time()
-    
     results = model(frame, conf=CONFIDENCE, iou=IOU, verbose=False)
     
     detections = []
@@ -102,21 +110,11 @@ def process_image(image_path):
             if crop.size == 0:
                 continue
             
-            processed = safe_preprocess(crop)
-            
-            ocr_results = reader.readtext(processed, detail=1, paragraph=False)
-            
-            text = ""
-            ocr_conf = 0.0
-            if ocr_results:
-                text = ocr_results[0][1]
-                ocr_conf = ocr_results[0][2]
-            
-            clean_text = smart_clean_plate_text(text)
+            text, ocr_conf = get_best_ocr(crop)
             
             detections.append({
                 'bbox': (x1, y1, x2, y2),
-                'text': clean_text,
+                'text': text,
                 'ocr_conf': ocr_conf,
                 'plate_conf': plate_conf
             })
@@ -140,7 +138,7 @@ if __name__ == "__main__":
     if not image_files:
         print("No images found!")
     else:
-        print(f"Found {len(image_files)} images. Running Option A - Smart Rules...\n")
+        print(f"Found {len(image_files)} images. Running Option B - Dual OCR...\n")
         
         for img_name in tqdm(image_files, desc="Processing"):
             img_path = os.path.join(INPUT_FOLDER, img_name)
@@ -180,4 +178,4 @@ if __name__ == "__main__":
             cv2.waitKey(0)
             cv2.destroyAllWindows()
         
-        print("\detection using easy ocr completed!")
+        print("\nDetection with combine easyocr and tesseract completed!")
