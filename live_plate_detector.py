@@ -12,7 +12,6 @@ from pathlib import Path
 from tqdm import tqdm
 import hashlib
 
-
 # ===================== CONFIG =====================
 MODEL_PATH = "models/best.pt"
 CONFIDENCE = 0.5
@@ -69,26 +68,49 @@ def safe_preprocess(crop):
 def smart_clean_plate_text(text):
     if not text:
         return ""
-    text = text.upper().strip()
-    # remove non-alphanumeric
-    text = "".join(c for c in text if c.isalnum())
-
-    # postion correction for indian format
-
-    result = list(text)
-    for i, c in enumerate(result):
-        if i < 2:  # State code = must be letters
-            if c.isdigit():
-                result[i] = {'0':'O','1':'I','8':'B','5':'S'}.get(c, c)
-        elif 2 <= i < 4:  # District number = must be digits
-            if c.isalpha():
-                result[i] = {'O':'0','I':'1','B':'8','S':'5','Z':'2'}.get(c, c)
-        elif i >= len(text) - 4:  # Last 4 = digits
-            if c.isalpha():
-                result[i] = {'O':'0','I':'1','B':'8','S':'5','Z':'2'}.get(c, c)
     
-    text = "".join(result)
-    return text[:10] # indian plates max ~10 chars
+    text = text.upper().strip()
+    
+    # Basic cleaning
+    text = "".join(c for c in text if c.isalnum())
+    
+    if len(text) < 6:
+        return text
+    
+    # Convert to list for position-based editing
+    chars = list(text)
+    
+    # Rule 1: State code (first 2 chars) should be letters
+    for i in range(min(2, len(chars))):
+        if chars[i].isdigit():
+            chars[i] = {'0':'O', '1':'I', '8':'B', '5':'S', '2':'Z'}.get(chars[i], chars[i])
+    
+    # Rule 2: District code (positions 2-4) should be digits
+    for i in range(2, min(4, len(chars))):
+        if chars[i].isalpha():
+            chars[i] = {'O':'0', 'I':'1', 'B':'8', 'S':'5', 'Z':'2'}.get(chars[i], chars[i])
+    
+    # Rule 3: Last 4 characters should preferably be digits
+    for i in range(max(0, len(chars)-4), len(chars)):
+        if chars[i].isalpha():
+            chars[i] = {'O':'0', 'I':'1', 'B':'8', 'S':'5', 'Z':'2'}.get(chars[i], chars[i])
+    
+    # Rule 4: Fix common middle confusions (positions 4 to -4)
+    for i in range(4, max(4, len(chars)-4)):
+        if chars[i] == 'B':
+            chars[i] = '8'
+        elif chars[i] == 'S':
+            chars[i] = '5'
+        elif chars[i] == '4' and i < len(chars)-2:   # avoid changing near end
+            chars[i] = '1'
+    
+    # Rule 5: Remove obvious wrong prefix (only if very long)
+    cleaned = "".join(chars)
+    if len(cleaned) > 11 and cleaned[0] in "E1IA":
+        cleaned = cleaned[1:]
+    
+    # Final safety: limit length (Indian plates are usually 9-10 chars)
+    return cleaned[:10]
 
 # ===================== DUAL OCR FUNCTION =====================
 def get_best_ocr(crop):
