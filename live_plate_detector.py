@@ -1,4 +1,3 @@
-# TES + ocr + preprocessing
 import cv2
 import time
 import json
@@ -11,6 +10,8 @@ import pytesseract
 from ultralytics import YOLO
 from pathlib import Path
 from tqdm import tqdm
+import hashlib
+
 
 # ===================== CONFIG =====================
 MODEL_PATH = "models/best.pt"
@@ -22,6 +23,8 @@ SAVE_ANNOTATED = True
 ANNOTATED_FOLDER = "output/annotated"
 
 USE_GPU = True                    # Change to False if GPU causes issues
+
+_ocr_cache = {}
 
 Path("output").mkdir(exist_ok=True)
 Path(ANNOTATED_FOLDER).mkdir(exist_ok=True)
@@ -50,35 +53,50 @@ def safe_preprocess(crop):
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
     target_height = 200
     aspect = gray.shape[1] / gray.shape[0]
-    new_width = int(target_height * aspect)
-    gray = cv2.resize(gray, (new_width, target_height), interpolation=cv2.INTER_CUBIC)
+    gray = cv2.resize(gray, (int(target_height * aspect), target_height),
+                      interpolation=cv2.INTER_CUBIC)
     
-    # Mild sharpening
-    kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=np.float32)
-    gray = cv2.filter2D(gray, -1, kernel)
-    return gray
+    std = gray.std()
+    if std < 40:
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
+        gray = clahe.apply(gray)
+    
+    kernel = np.array([[0,-1,0],[-1,5,-1],[0,-1,0]], dtype=np.float32)
+    return cv2.filter2D(gray, -1, kernel)
+
 
 # ===================== SMART CLEANING =====================
 def smart_clean_plate_text(text):
     if not text:
         return ""
     text = text.upper().strip()
-    text = text.replace(" ", "").replace("~", "").replace("|", "").replace("-", "") \
-               .replace(".", "").replace(":", "").replace(";", "").replace(",", "")
-    
-    text = text.replace("O", "0").replace("I", "1").replace("Z", "2")
-    text = text.replace("B", "8") if "B" in text else text
-    text = text.replace("S", "5") if "S" in text else text
-    text = text.replace("4", "1") if "4" in text[2:6] else text
-    text = text.replace("2", "7") if "2" in text[3:7] else text
-    
+    # remove non-alphanumeric
     text = "".join(c for c in text if c.isalnum())
-    if len(text) > 12:
-        text = text[:12]
-    return text
+
+    # postion correction for indian format
+
+    result = list(text)
+    for i, c in enumerate(result):
+        if i < 2:  # State code = must be letters
+            if c.isdigit():
+                result[i] = {'0':'O','1':'I','8':'B','5':'S'}.get(c, c)
+        elif 2 <= i < 4:  # District number = must be digits
+            if c.isalpha():
+                result[i] = {'O':'0','I':'1','B':'8','S':'5','Z':'2'}.get(c, c)
+        elif i >= len(text) - 4:  # Last 4 = digits
+            if c.isalpha():
+                result[i] = {'O':'0','I':'1','B':'8','S':'5','Z':'2'}.get(c, c)
+    
+    text = "".join(result)
+    return text[:10] # indian plates max ~10 chars
 
 # ===================== DUAL OCR FUNCTION =====================
 def get_best_ocr(crop):
+    #  Hash the crop pixels — same plate crop = same hash = skip reprocessing
+    crop_hash = hashlib.md5(crop.tobytes()).hexdigest()
+    if crop_hash in _ocr_cache:
+        return _ocr_cache[crop_hash]
+    
     processed = safe_preprocess(crop)
     if processed is None:
         return "", 0.0
@@ -102,6 +120,9 @@ def get_best_ocr(crop):
         return clean_easy, easy_conf
     else:
         return clean_tess, tess_conf
+
+    _ocr_cache[crop_hash] = result  # store before returning
+    return result
 
 def process_image(image_path):
     frame = cv2.imread(image_path)
@@ -144,50 +165,66 @@ def draw_results(frame, detections):
 
 # ===================== MAIN =====================
 if __name__ == "__main__":
-    image_files = [f for f in os.listdir(INPUT_FOLDER) 
+    image_files = [f for f in os.listdir(INPUT_FOLDER)
                    if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp'))]
-    
+
     if not image_files:
         print("No images found in test_images folder!")
     else:
-        print(f"Found {len(image_files)} images. Running Dual OCR (EasyOCR + Tesseract) with GPU={USE_GPU}...\n")
-        
-        for img_name in tqdm(image_files, desc="Processing"):
-            img_path = os.path.join(INPUT_FOLDER, img_name)
-            frame, detections, fps = process_image(img_path)
-            
-            if frame is None:
-                continue
-                
-            print(f"{img_name} | FPS: {fps:.1f}")
-            
-            for det in detections:
-                if det['text'] and len(det['text']) >= 6:
-                    entry = {
-                        "timestamp": datetime.datetime.now().isoformat(),
-                        "image_name": img_name,
-                        "plate_text": det['text'],
-                        "ocr_confidence": float(det['ocr_conf']),
-                        "plate_confidence": float(det['plate_conf']),
-                        "bbox": det['bbox']
-                    }
-                    
-                    data = []
-                    if os.path.exists(JSON_FILE):
-                        with open(JSON_FILE, 'r') as f:
-                            data = json.load(f)
-                    data.append(entry)
-                    with open(JSON_FILE, 'w') as f:
-                        json.dump(data, f, indent=2)
-                    
-                    print(f"   → {det['text']} (OCR: {det['ocr_conf']:.2f})")
-            
-            annotated = draw_results(frame.copy(), detections)
-            if SAVE_ANNOTATED:
-                cv2.imwrite(os.path.join(ANNOTATED_FOLDER, f"annotated_{img_name}"), annotated)
-            
-            cv2.imshow(f"Result - {img_name}", annotated)
-            cv2.waitKey(0)
-            cv2.destroyAllWindows()
-        
-        print("\nDual OCR detection completed!")
+        # Load existing index
+        all_entries = []
+        processed_images = set()
+        if os.path.exists(JSON_FILE):
+            with open(JSON_FILE, 'r') as f:
+                all_entries = json.load(f)
+            processed_images = {e["image_name"] for e in all_entries}
+
+        to_process = [f for f in image_files if f not in processed_images]
+        print(f"{len(to_process)} new images to process (skipping {len(processed_images)} already done)\n")
+
+        if to_process:
+            all_paths = [os.path.join(INPUT_FOLDER, f) for f in to_process]
+
+            print("Running YOLO batch detection...")
+            batch_results = model(all_paths, conf=CONFIDENCE, iou=IOU,
+                                  verbose=False, batch=8)
+
+            for img_name, result in tqdm(zip(to_process, batch_results),
+                                         desc="Running OCR", total=len(to_process)):
+                frame = cv2.imread(os.path.join(INPUT_FOLDER, img_name))
+                if frame is None:
+                    continue
+
+                for box in result.boxes:
+                    x1, y1, x2, y2 = map(int, box.xyxy[0])
+                    plate_conf = float(box.conf[0])
+                    crop = frame[y1:y2, x1:x2]
+                    if crop.size == 0:
+                        continue
+
+                    text, ocr_conf = get_best_ocr(crop)
+
+                    if text and len(text) >= 8:
+                        entry = {
+                            "timestamp": datetime.datetime.now().isoformat(),
+                            "image_name": img_name,
+                            "plate_text": text,
+                            "ocr_confidence": float(ocr_conf),
+                            "plate_confidence": plate_conf,
+                            "bbox": (x1, y1, x2, y2)
+                        }
+                        all_entries.append(entry)
+                        print(f"  {img_name} → {text} (OCR: {ocr_conf:.2f})")
+
+                    if SAVE_ANNOTATED:
+                        annotated = draw_results(frame.copy(),
+                                                 [{"bbox": (x1, y1, x2, y2),
+                                                   "text": text,
+                                                   "ocr_conf": ocr_conf}])
+                        cv2.imwrite(os.path.join(ANNOTATED_FOLDER,
+                                                 f"annotated_{img_name}"), annotated)
+
+            # Single write at the end
+            with open(JSON_FILE, 'w') as f:
+                json.dump(all_entries, f, indent=2)
+            print(f"\nDone. {len(all_entries)} total entries saved.")
