@@ -5,7 +5,7 @@ import datetime
 import os
 import torch
 import numpy as np
-import easyocr
+# import easyocr
 import pytesseract
 from ultralytics import YOLO
 from pathlib import Path
@@ -37,8 +37,8 @@ print(f"Using device for YOLO: {device}")
 model = YOLO(MODEL_PATH)
 model.to(device)
 
-print("Loading EasyOCR...")
-reader = easyocr.Reader(['en'], gpu=USE_GPU)
+# print("Loading EasyOCR...")
+# reader = easyocr.Reader(['en'], gpu=USE_GPU)
 
 print("Loading Tesseract...")
 # Note: Make sure Tesseract is installed on your system
@@ -70,80 +70,57 @@ def smart_clean_plate_text(text):
         return ""
     
     text = text.upper().strip()
-    
-    # Basic cleaning
     text = "".join(c for c in text if c.isalnum())
     
-    if len(text) < 6:
-        return text
+    if len(text) < 4:
+        return ""
     
-    # Convert to list for position-based editing
-    chars = list(text)
-    
-    # Rule 1: State code (first 2 chars) should be letters
-    for i in range(min(2, len(chars))):
-        if chars[i].isdigit():
-            chars[i] = {'0':'O', '1':'I', '8':'B', '5':'S', '2':'Z'}.get(chars[i], chars[i])
-    
-    # Rule 2: District code (positions 2-4) should be digits
-    for i in range(2, min(4, len(chars))):
-        if chars[i].isalpha():
-            chars[i] = {'O':'0', 'I':'1', 'B':'8', 'S':'5', 'Z':'2'}.get(chars[i], chars[i])
-    
-    # Rule 3: Last 4 characters should preferably be digits
-    for i in range(max(0, len(chars)-4), len(chars)):
-        if chars[i].isalpha():
-            chars[i] = {'O':'0', 'I':'1', 'B':'8', 'S':'5', 'Z':'2'}.get(chars[i], chars[i])
-    
-    # Rule 4: Fix common middle confusions (positions 4 to -4)
-    for i in range(4, max(4, len(chars)-4)):
-        if chars[i] == 'B':
-            chars[i] = '8'
-        elif chars[i] == 'S':
-            chars[i] = '5'
-        elif chars[i] == '4' and i < len(chars)-2:   # avoid changing near end
-            chars[i] = '1'
-    
-    # Rule 5: Remove obvious wrong prefix (only if very long)
-    cleaned = "".join(chars)
-    if len(cleaned) > 11 and cleaned[0] in "E1IA":
-        cleaned = cleaned[1:]
-    
-    # Final safety: limit length (Indian plates are usually 9-10 chars)
-    return cleaned[:10]
+    # Only correct at boundaries where format is unambiguous:
+    # first 2 chars must be letters — fix obvious digit-looks-like-letter
+    result = list(text)
+    digit_to_letter = {'0':'O', '1':'I', '5':'S', '8':'B'}
+    letter_to_digit = {'O':'0', 'I':'1', 'S':'5', 'B':'8', 'Z':'2', 'G':'6'}
+
+    for i in range(min(2, len(result))):
+        if result[i].isdigit():
+            result[i] = digit_to_letter.get(result[i], result[i])
+
+    # chars 2-4 must be digits — fix obvious letter-looks-like-digit
+    for i in range(2, min(4, len(result))):
+        if result[i].isalpha():
+            result[i] = letter_to_digit.get(result[i], result[i])
+
+    # last 4 must be digits
+    for i in range(max(4, len(result)-4), len(result)):
+        if result[i].isalpha():
+            result[i] = letter_to_digit.get(result[i], result[i])
+
+    return "".join(result)
 
 # ===================== DUAL OCR FUNCTION =====================
 def get_best_ocr(crop):
-    #  Hash the crop pixels — same plate crop = same hash = skip reprocessing
     crop_hash = hashlib.md5(crop.tobytes()).hexdigest()
     if crop_hash in _ocr_cache:
         return _ocr_cache[crop_hash]
-    
+
     processed = safe_preprocess(crop)
     if processed is None:
         return "", 0.0
-    
-    # EasyOCR
-    easy_results = reader.readtext(processed, detail=1, paragraph=False)
-    easy_text = easy_results[0][1] if easy_results else ""
-    easy_conf = easy_results[0][2] if easy_results else 0.0
-    
-    # Tesseract
-    tess_config = r'--oem 3 --psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-    tess_text = pytesseract.image_to_string(processed, config=tess_config).strip()
-    tess_conf = 0.7 if len(tess_text) >= 8 else 0.4
-    
-    # Clean both
-    clean_easy = smart_clean_plate_text(easy_text)
-    clean_tess = smart_clean_plate_text(tess_text)
-    
-    # Choose the better one (prefer longer and higher confidence)
-    if len(clean_easy) >= len(clean_tess) and easy_conf > 0.3:
-        return clean_easy, easy_conf
-    else:
-        return clean_tess, tess_conf
 
-    _ocr_cache[crop_hash] = result  # store before returning
+    tess_config = r'--oem 1 --psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+    data = pytesseract.image_to_data(processed, config=tess_config,
+                                     output_type=pytesseract.Output.DICT)
+    
+    words = [w for w, c in zip(data['text'], data['conf']) 
+             if w.strip() and int(c) > 0]
+    confs = [int(c) for c in data['conf'] if int(c) > 0]
+
+    text = "".join(words)
+    conf = sum(confs) / len(confs) / 100 if confs else 0.0
+
+    text = smart_clean_plate_text(text)
+    result = (text, conf)
+    _ocr_cache[crop_hash] = result
     return result
 
 def process_image(image_path):
