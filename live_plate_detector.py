@@ -97,8 +97,11 @@ def smart_clean_plate_text(text):
 
     return "".join(result)
 
-# ===================== DUAL OCR FUNCTION =====================
+# ===================== OCR FUNCTION =====================
 def get_best_ocr(crop):
+    if crop is None or crop.size == 0:
+        return "", 0.0
+    
     crop_hash = hashlib.md5(crop.tobytes()).hexdigest()
     if crop_hash in _ocr_cache:
         return _ocr_cache[crop_hash]
@@ -106,22 +109,26 @@ def get_best_ocr(crop):
     processed = safe_preprocess(crop)
     if processed is None:
         return "", 0.0
-
+    
+    # save debug crop
+    cv2.imwrite(f"output/debug_{crop_hash[:6]}.png", processed)
+    
     tess_config = r'--oem 1 --psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
     data = pytesseract.image_to_data(processed, config=tess_config,
                                      output_type=pytesseract.Output.DICT)
     
-    words = [w for w, c in zip(data['text'], data['conf']) 
-             if w.strip() and int(c) > 0]
+    print(f"raw: {list(zip(data['text'], data['conf']))}")
+    
+    words = [w for w, c in zip(data['text'], data['conf']) if w.strip() and int(c) > 0]
     confs = [int(c) for c in data['conf'] if int(c) > 0]
-
-    text = "".join(words)
+    
+    text = smart_clean_plate_text("".join(words))
     conf = sum(confs) / len(confs) / 100 if confs else 0.0
-
-    text = smart_clean_plate_text(text)
+    
     result = (text, conf)
     _ocr_cache[crop_hash] = result
     return result
+
 
 def process_image(image_path):
     frame = cv2.imread(image_path)
