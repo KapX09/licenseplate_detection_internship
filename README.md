@@ -52,25 +52,29 @@ _Phase 2: Preprocessing_
 
 _Phase 3: OCR Evaluation_
 - EasyOCR (grayscale + resize + mild sharpening) → **most stable**
-- Tesseract: Frequent prefix noise | Lower consistency
+- Tesseract: Frequent prefix noise | Lower consistency | inconsistent parsing
 - PaddleOCR:| Config issues (`det=False`, shape tuning) | Inconsistent outputs
+
+_Ensemble + Optimization_ : Dual OCR (EasyOCR + Tesseract) with voting | Added lightweight GPU optimizations | Result: improved usable accuracy
 
 _Phase 4: Post-processing_
 - Rule-based corrections: Character mapping: O→0, I→1, Z→2, B→8 | Position-aware fixes | Length validation + noise filtering
 - Result: significant improvement in usable outputs
 
+_(Current)_ : Tesseract only + minimal preprocessing | Focus: cleaner pipeline with comparable performance  
+
 ---
 _**Performance Summary**_
 
-| Experiment                    | Exact Match | Usable Accuracy | Issues                          |
-|-----------------------------|------------|-----------------|---------------------------------|
-| EasyOCR (baseline)          | ~15%       | ~25%            | Random chars, low confidence    |
-| Heavy preprocessing         | ~20%       | ~40%            | Artifacts, instability          |
-| PaddleOCR                   | ~25%       | ~45%            | Inconsistent + config issues    |
-| EasyOCR + rules (final)     | 33%        | 67%             | Confusions remain               |
-
-- Best sample: `img7.jpg` (confidence ~0.79)
-- Dataset: 6 images → 2 exact, 4 near-correct
+| Trial | Approach                          | Exact Match | Usable Accuracy | Major Observation                  |
+|------|----------------------------------|------------|-----------------|----------------------------------|
+| 1    | Basic EasyOCR                    | ~15%       | ~25%            | Very low confidence              |
+| 2    | EasyOCR + Heavy Preprocessing    | ~20%       | ~40%            | Artifacts introduced             |
+| 3    | EasyOCR + Tesseract (Dual)       | 22%        | 55%             | Better coverage                  |
+| 4    | PaddleOCR                        | 25%        | 45%             | Inconsistent                     |
+| 5    | EasyOCR + Smart Rules            | 33%        | 67%             | Good but slightly overfitted     |
+| 6    | Dual OCR + GPU Optimization      | 33%        | 75%             | Best usable accuracy             |
+| 7    | Tesseract + Minimal Prep         | 33%        | 66.7%           | Simpler and stable pipeline      |
 ---
 
 _**Current Limitations**_
@@ -79,5 +83,5 @@ _**Current Limitations**_
   - 1 / 4 / 7
   - B / 8
   - 2 / 7
+  - Extra prefix noise (E, 1)
 ---
-Next: Implement OCR ensemble (EasyOCR + Tesseract) with confidence-based voting and integrate into real-time inference pipeline.
