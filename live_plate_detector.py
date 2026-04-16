@@ -5,232 +5,154 @@ import datetime
 import os
 import torch
 import numpy as np
-# import easyocr
 import pytesseract
 from ultralytics import YOLO
 from pathlib import Path
 from tqdm import tqdm
-import hashlib
 
-# ===================== CONFIG =====================
+# configuartion
 MODEL_PATH = "models/best.pt"
 CONFIDENCE = 0.5
 IOU = 0.45
 INPUT_FOLDER = "test_images"
 JSON_FILE = "output/captured_plates.json"
-SAVE_ANNOTATED = True
-ANNOTATED_FOLDER = "output/annotated"
 
-USE_GPU = True                    # Change to False if GPU causes issues
+# Output Folders
+CROPPED_FOLDER = "output/cropped_plates"
+ANNOTATED_FOLDER = "output/annotated_outputs"
 
-_ocr_cache = {}
+USE_GPU = True
 
 Path("output").mkdir(exist_ok=True)
+Path(CROPPED_FOLDER).mkdir(exist_ok=True)
 Path(ANNOTATED_FOLDER).mkdir(exist_ok=True)
 
-# ===================== LOAD MODELS =====================
-print("Loading models...")
-
+# laoding models
+print("Loading YOLO model...")
 device = 'cuda' if torch.cuda.is_available() and USE_GPU else 'cpu'
-print(f"Using device for YOLO: {device}")
-
 model = YOLO(MODEL_PATH)
 model.to(device)
+print(f"Model loaded on {device}\n")
 
-# print("Loading EasyOCR...")
-# reader = easyocr.Reader(['en'], gpu=USE_GPU)
-
-print("Loading Tesseract...")
-# Note: Make sure Tesseract is installed on your system
-
-print(f"Models loaded! (GPU = {USE_GPU})\n")
-
-# ===================== SAFE PREPROCESSING =====================
-def safe_preprocess(crop):
+# preprocessing
+def simple_preprocess(crop):
+    """Only one type: Grayscale + Resize (no other filters)"""
     if crop is None or crop.size == 0:
         return None
+    
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-    target_height = 200
+    
+    #generalising the size of the plates
+    target_height = 220
     aspect = gray.shape[1] / gray.shape[0]
-    gray = cv2.resize(gray, (int(target_height * aspect), target_height),
+    gray = cv2.resize(gray, (int(target_height * aspect), target_height), 
                       interpolation=cv2.INTER_CUBIC)
     
-    std = gray.std()
-    if std < 40:
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
-        gray = clahe.apply(gray)
-    
-    kernel = np.array([[0,-1,0],[-1,5,-1],[0,-1,0]], dtype=np.float32)
-    return cv2.filter2D(gray, -1, kernel)
+    return gray
 
-
-# ===================== SMART CLEANING =====================
-def smart_clean_plate_text(text):
-    if not text:
-        return ""
-    
-    text = text.upper().strip()
-    text = "".join(c for c in text if c.isalnum())
-    
-    if len(text) < 4:
-        return ""
-    
-    # Only correct at boundaries where format is unambiguous:
-    # first 2 chars must be letters — fix obvious digit-looks-like-letter
-    result = list(text)
-    digit_to_letter = {'0':'O', '1':'I', '5':'S', '8':'B'}
-    letter_to_digit = {'O':'0', 'I':'1', 'S':'5', 'B':'8', 'Z':'2', 'G':'6'}
-
-    for i in range(min(2, len(result))):
-        if result[i].isdigit():
-            result[i] = digit_to_letter.get(result[i], result[i])
-
-    # chars 2-4 must be digits — fix obvious letter-looks-like-digit
-    for i in range(2, min(4, len(result))):
-        if result[i].isalpha():
-            result[i] = letter_to_digit.get(result[i], result[i])
-
-    # last 4 must be digits
-    for i in range(max(4, len(result)-4), len(result)):
-        if result[i].isalpha():
-            result[i] = letter_to_digit.get(result[i], result[i])
-
-    return "".join(result)
-
-# ===================== OCR FUNCTION =====================
-def get_best_ocr(crop):
-    if crop is None or crop.size == 0:
-        return "", 0.0
-    
-    crop_hash = hashlib.md5(crop.tobytes()).hexdigest()
-    if crop_hash in _ocr_cache:
-        return _ocr_cache[crop_hash]
-
-    processed = safe_preprocess(crop)
+#Tesseract tunning
+def run_tesseract(crop, img_name):
+    processed = simple_preprocess(crop)
     if processed is None:
         return "", 0.0
     
-    # save debug crop
-    cv2.imwrite(f"output/debug_{crop_hash[:6]}.png", processed)
+    # Save cropped plate for debugging
+    crop_path = os.path.join(CROPPED_FOLDER, f"crop_{img_name}")
+    cv2.imwrite(crop_path, processed)
     
-    tess_config = r'--oem 1 --psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-    data = pytesseract.image_to_data(processed, config=tess_config,
-                                     output_type=pytesseract.Output.DICT)
+    # Tuned Tesseract config for Indian plates
+    config = r'--oem 3 --psm 8 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
     
-    print(f"raw: {list(zip(data['text'], data['conf']))}")
+    raw_text = pytesseract.image_to_string(processed, config=config).strip()
     
-    words = [w for w, c in zip(data['text'], data['conf']) if w.strip() and int(c) > 0]
-    confs = [int(c) for c in data['conf'] if int(c) > 0]
+    # NO correction - as you wanted
+    clean_text = raw_text.upper().replace(" ", "")
     
-    text = smart_clean_plate_text("".join(words))
-    conf = sum(confs) / len(confs) / 100 if confs else 0.0
+    conf = 0.75 if len(clean_text) >= 8 else 0.40
     
-    result = (text, conf)
-    _ocr_cache[crop_hash] = result
-    return result
+    return clean_text, conf
 
-
-def process_image(image_path):
-    frame = cv2.imread(image_path)
-    if frame is None:
-        return None, None, 0
-    
-    start = time.time()
-    
-    results = model(frame, conf=CONFIDENCE, iou=IOU, verbose=False)
-    
-    detections = []
-    for result in results:
-        for box in result.boxes:
-            x1, y1, x2, y2 = map(int, box.xyxy[0])
-            plate_conf = float(box.conf[0])
-            
-            crop = frame[y1:y2, x1:x2]
-            if crop.size == 0:
-                continue
-            
-            text, ocr_conf = get_best_ocr(crop)
-            
-            detections.append({
-                'bbox': (x1, y1, x2, y2),
-                'text': text,
-                'ocr_conf': ocr_conf,
-                'plate_conf': plate_conf
-            })
-    
-    fps = 1.0 / (time.time() - start) if (time.time() - start) > 0 else 0
-    return frame, detections, fps
-
-def draw_results(frame, detections):
+# annotation 
+def draw_annotated(frame, detections, img_name):
     for det in detections:
         x1, y1, x2, y2 = det['bbox']
         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 3)
         label = f"{det['text']} ({det['ocr_conf']:.2f})"
         cv2.putText(frame, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+    
+    annotated_path = os.path.join(ANNOTATED_FOLDER, f"annotated_{img_name}")
+    cv2.imwrite(annotated_path, frame)
     return frame
 
-# ===================== MAIN =====================
 if __name__ == "__main__":
-    image_files = [f for f in os.listdir(INPUT_FOLDER)
+    image_files = [f for f in os.listdir(INPUT_FOLDER) 
                    if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp'))]
-
+    
     if not image_files:
-        print("No images found in test_images folder!")
+        print("No images found!")
     else:
-        # Load existing index
-        all_entries = []
-        processed_images = set()
-        if os.path.exists(JSON_FILE):
-            with open(JSON_FILE, 'r') as f:
-                all_entries = json.load(f)
-            processed_images = {e["image_name"] for e in all_entries}
-
-        to_process = [f for f in image_files if f not in processed_images]
-        print(f"{len(to_process)} new images to process (skipping {len(processed_images)} already done)\n")
-
-        if to_process:
-            all_paths = [os.path.join(INPUT_FOLDER, f) for f in to_process]
-
-            print("Running YOLO batch detection...")
-            batch_results = model(all_paths, conf=CONFIDENCE, iou=IOU,
-                                  verbose=False, batch=8)
-
-            for img_name, result in tqdm(zip(to_process, batch_results),
-                                         desc="Running OCR", total=len(to_process)):
-                frame = cv2.imread(os.path.join(INPUT_FOLDER, img_name))
-                if frame is None:
-                    continue
-
+        print(f"Found {len(image_files)} images. Running Simple Tesseract...\n")
+        
+        for img_name in tqdm(image_files, desc="Processing"):
+            img_path = os.path.join(INPUT_FOLDER, img_name)
+            frame = cv2.imread(img_path)
+            if frame is None:
+                continue
+            
+            start = time.time()
+            results = model(frame, conf=CONFIDENCE, iou=IOU, verbose=False)
+            
+            detections = []
+            for result in results:
                 for box in result.boxes:
                     x1, y1, x2, y2 = map(int, box.xyxy[0])
                     plate_conf = float(box.conf[0])
+                    
                     crop = frame[y1:y2, x1:x2]
                     if crop.size == 0:
                         continue
-
-                    text, ocr_conf = get_best_ocr(crop)
-
-                    if text and len(text) >= 8:
-                        entry = {
-                            "timestamp": datetime.datetime.now().isoformat(),
-                            "image_name": img_name,
-                            "plate_text": text,
-                            "ocr_confidence": float(ocr_conf),
-                            "plate_confidence": plate_conf,
-                            "bbox": (x1, y1, x2, y2)
-                        }
-                        all_entries.append(entry)
-                        print(f"  {img_name} → {text} (OCR: {ocr_conf:.2f})")
-
-                    if SAVE_ANNOTATED:
-                        annotated = draw_results(frame.copy(),
-                                                 [{"bbox": (x1, y1, x2, y2),
-                                                   "text": text,
-                                                   "ocr_conf": ocr_conf}])
-                        cv2.imwrite(os.path.join(ANNOTATED_FOLDER,
-                                                 f"annotated_{img_name}"), annotated)
-
-            # Single write at the end
-            with open(JSON_FILE, 'w') as f:
-                json.dump(all_entries, f, indent=2)
-            print(f"\nDone. {len(all_entries)} total entries saved.")
+                    
+                    text, ocr_conf = run_tesseract(crop, img_name)
+                    
+                    detections.append({
+                        'bbox': (x1, y1, x2, y2),
+                        'text': text,
+                        'ocr_conf': ocr_conf,
+                        'plate_conf': plate_conf
+                    })
+            
+            fps = 1.0 / (time.time() - start) if (time.time() - start) > 0 else 0
+            print(f"{img_name} | FPS: {fps:.1f}")
+            
+            # Save to JSON
+            for det in detections:
+                if det['text'] and len(det['text']) >= 6:
+                    entry = {
+                        "timestamp": datetime.datetime.now().isoformat(),
+                        "image_name": img_name,
+                        "plate_text": det['text'],
+                        "ocr_confidence": float(det['ocr_conf']),
+                        "plate_confidence": float(det['plate_conf']),
+                        "bbox": det['bbox']
+                    }
+                    data = []
+                    if os.path.exists(JSON_FILE):
+                        with open(JSON_FILE, 'r') as f:
+                            data = json.load(f)
+                    data.append(entry)
+                    with open(JSON_FILE, 'w') as f:
+                        json.dump(data, f, indent=2)
+                    
+                    print(f"   → {det['text']}")
+            
+            # saving 
+            if detections:
+                annotated_frame = draw_annotated(frame.copy(), detections, img_name)
+                cv2.imshow(f"Result - {img_name}", annotated_frame)
+                cv2.waitKey(0)
+                cv2.destroyAllWindows()
+        
+        print("\nDetection completed.")
+        print(f"Cropped plates saved in: {CROPPED_FOLDER}")
+        print(f"Annotated images saved in: {ANNOTATED_FOLDER}")
+        print(f"Logs saved in: {JSON_FILE}")
