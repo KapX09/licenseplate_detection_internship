@@ -29,17 +29,15 @@ python live_plate_detector.py
 Frame Capture → Plate Detection → ROI Extraction → OCR → Output Visualization
 Place trained model weights inside `models/`.
 
-### Prototype1: Testing models with the images of Licensed plates of vehicles with Trained model and OCR ( ***Optical Character Recognition***) engine.
+### Prototype1: Testing .pt model with the images of Licensed plates of vehicles with Trained model and OCR ( ***Optical Character Recognition***) engine.
 **_Overview_**
 Pipeline for Indian license plate recognition using a custom YOLOv8 detector (`best.pt`) followed by OCR-based character extraction. Input: static images. Output: recognized plate string.
 
----
 ### Pipeline
 1. Plate Detection → YOLOv8 (`best.pt`)
 2. Region Cropping → bounding box extraction
 3. OCR → EasyOCR (primary)
 4. Post-processing → rule-based correction
----
 
 #### Development & Experiments
 _Phase 1: Baseline_
@@ -63,7 +61,6 @@ _Phase 4: Post-processing_
 
 _(Current)_ : Tesseract only + minimal preprocessing | Focus: cleaner pipeline with comparable performance  
 
----
 _**Performance Summary**_
 
 | Trial | Approach                          | Exact Match | Usable Accuracy | Major Observation                  |
@@ -85,3 +82,19 @@ _**Current Limitations**_
   - 2 / 7
   - Extra prefix noise (E, 1)
 ---
+
+### Prototype2: Testing .onnx model with the images of Licensed plates of vehicles with Trained model and OCR engine.
+
+_**Overview:**_
+- Optimized ALPR pipeline using YOLO (ONNX format) for fast inference and Tesseract-based OCR. Focus on lightweight deployment and improved runtime performance.
+##### _**Pipeline:**_
+- Frame/Image → ONNX Detection → ROI Crop → OCR → Post-processing
+
+##### _**Key Changes:**_
+- Converted YOLOv8 `.pt` → `.onnx` | OCR readability improvement | Simplified pipeline for stability. 
+
+##### _**Performance Focus:**_
+- Reduced latency | Improved deployment flexibility | Comparable OCR accuracy to Prototype1
+
+##### _**Notes:**_
+- Better suited for real-time applications | Still limited by OCR misclassification (1/7, B/8, etc.)
