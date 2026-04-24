@@ -8,3 +8,4 @@ easyocr
 PyYAML
 numpy
 pytesseract
+onnxruntime-gpu
