@@ -1,4 +1,4 @@
-## increase ocr redeability
+# using GPU.
 import cv2
 import numpy as np
 import onnxruntime as ort
@@ -7,24 +7,25 @@ import os
 import sys
 from pathlib import Path
 
-# Config 
-MODEL_PATH   = "models/best.onnx"   
+#config
+MODEL_PATH   = "models/best.onnx"   # change to your .onnx filename
 TEST_DIR     = "test_images"
 CONF_THRESH  = 0.4
 IOU_THRESH   = 0.45
 INPUT_SIZE   = (640, 640)                      # adjust if your model differs
+# 
 
 
 # Load ONNX model
 sess_opts = ort.SessionOptions()
 sess_opts.log_severity_level = 3
 session = ort.InferenceSession(MODEL_PATH, sess_opts=sess_opts,
-                               providers=["CPUExecutionProvider"])
+                               providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
 input_name  = session.get_inputs()[0].name
 input_shape = session.get_inputs()[0].shape   # e.g. [1, 3, 640, 640]
 
 # EasyOCR reader (loads once)
-reader = easyocr.Reader(["en"], gpu=False)
+reader = easyocr.Reader(["en"], gpu=True)
 
 
 def preprocess(img_bgr, size=INPUT_SIZE):
@@ -178,7 +179,7 @@ def process_image(img_path):
         sys.exit(0)
 
 
-# Main
+# main
 if __name__ == "__main__":
     test_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(TEST_DIR)
     exts     = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
@@ -193,3 +194,50 @@ if __name__ == "__main__":
         process_image(img_path)
 
     print("\nDone.")
+
+
+
+
+'''
+Processing 10 image(s) from 'test_images' ...
+
+img1.jpg  →  1 plate(s) found
+  [1] H62GEO8  (0.86)
+  Press any key for next image, 'q' to quit ...
+
+img10.jpg  →  1 plate(s) found
+  [1] KLO7BFS00Q  (0.70)
+  Press any key for next image, 'q' to quit ...
+
+img2.jpg  →  1 plate(s) found
+  [1] HKA51J81561  (0.76)
+  Press any key for next image, 'q' to quit ...
+
+img3.jpg  →  1 plate(s) found
+  [1] FUK078A7252  (0.77)
+  Press any key for next image, 'q' to quit ...
+
+img4.jpg  →  1 plate(s) found
+  [1] IFUP78EJ7683  (0.77)
+  Press any key for next image, 'q' to quit ...
+
+img5.jpg  →  1 plate(s) found
+  [1] FDLTOCG46931  (0.72)
+  Press any key for next image, 'q' to quit ...
+
+img6.jpg  →  1 plate(s) found
+  [1] HKA51J81561  (0.76)
+  Press any key for next image, 'q' to quit ...
+
+img7.jpg  →  1 plate(s) found
+  [1] EUP32EC511IT  (0.78)
+  Press any key for next image, 'q' to quit ...
+
+img8.jpg  →  1 plate(s) found
+  [1] MTSOBER9643  (0.69)
+  Press any key for next image, 'q' to quit ...
+
+img9.jpg  →  1 plate(s) found
+  [1] MS1B22002  (0.81)
+  Press any key for next image, 'q' to quit ...
+'''
