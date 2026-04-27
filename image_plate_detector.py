@@ -1,6 +1,4 @@
-# Created a .onnx model from the .pt model for plated detection, Using Easy ocr to detect the characters from the plates.
-# inputs are images and outputs are displayed.
-
+## increase ocr redeability
 import cv2
 import numpy as np
 import onnxruntime as ort
@@ -9,12 +7,13 @@ import os
 import sys
 from pathlib import Path
 
-# Config
+# Config 
 MODEL_PATH   = "models/best.onnx"   
 TEST_DIR     = "test_images"
 CONF_THRESH  = 0.4
 IOU_THRESH   = 0.45
 INPUT_SIZE   = (640, 640)                      # adjust if your model differs
+
 
 # Load ONNX model
 sess_opts = ort.SessionOptions()
@@ -113,17 +112,36 @@ def postprocess(output, orig_w, orig_h, size=INPUT_SIZE):
     return results
 
 
+def preprocess_plate(crop):
+    h, w = crop.shape[:2]
+    scale = max(1, 200 // max(w, 1))
+    crop = cv2.resize(crop, (w * scale, h * scale), interpolation=cv2.INTER_CUBIC)
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    gray = cv2.fastNlMeansDenoising(gray, h=15)
+    kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
+    gray = cv2.filter2D(gray, -1, kernel)
+    gray = cv2.adaptiveThreshold(gray, 255,
+                                 cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                 cv2.THRESH_BINARY, 31, 15)
+    return gray
+
+
 def read_plate(img_bgr, x1, y1, x2, y2):
-    """Crop plate region and run EasyOCR."""
     crop = img_bgr[y1:y2, x1:x2]
     if crop.size == 0:
         return ""
-    # slight upscale helps OCR on small plates
-    h, w = crop.shape[:2]
-    if w < 100:
-        crop = cv2.resize(crop, (w*2, h*2), interpolation=cv2.INTER_CUBIC)
-    results = reader.readtext(crop, detail=0, allowlist="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
-    return " ".join(results).upper()
+    processed = preprocess_plate(crop)
+    results = reader.readtext(
+        processed,
+        detail=0,
+        allowlist="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+        paragraph=False,
+        contrast_ths=0.1,
+        adjust_contrast=0.5,
+        text_threshold=0.6,
+        low_text=0.3,
+    )
+    return "".join(results).upper()
 
 
 def process_image(img_path):
@@ -160,7 +178,7 @@ def process_image(img_path):
         sys.exit(0)
 
 
-# ── Main
+# Main
 if __name__ == "__main__":
     test_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(TEST_DIR)
     exts     = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
@@ -174,4 +192,4 @@ if __name__ == "__main__":
     for img_path in images:
         process_image(img_path)
 
-    print(f"\nDone.")
+    print("\nDone.")
