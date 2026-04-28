@@ -5,13 +5,13 @@ import easyocr
 import sys
 from pathlib import Path
 
-# Config 
+
 MODEL_PATH  = "models/best.onnx"
 TEST_DIR    = "test_images"
 CONF_THRESH = 0.4
 IOU_THRESH  = 0.45
 INPUT_SIZE  = (640, 640)
-SKIP_LEFT   = 0.20   # skip leftmost 20% of plate (IND badge)
+SKIP_LEFT   = 0.10   # skip leftmost 10% of plate (IND badge)
 
 
 sess_opts = ort.SessionOptions()
@@ -161,45 +161,46 @@ if __name__ == "__main__":
     print("\nDone.")
 
 '''
-Processing 10 image(s) from 'test_images' ...
 
 img1.jpg  →  1 plate(s) found
-  [1] I2GBOBHU  (0.86)
+  [1] IH2ABH  (0.86)
   Press any key for next image, 'q' to quit ...
 
 img10.jpg  →  1 plate(s) found
-  [1] LO7BF5OOO  (0.70)
+  [1] KLO7BFSOOO  (0.70)
   Press any key for next image, 'q' to quit ...
 
 img2.jpg  →  1 plate(s) found
-  [1] 4514J8156  (0.76)
+  [1] K451MJ8156  (0.76)
   Press any key for next image, 'q' to quit ...
 
 img3.jpg  →  1 plate(s) found
-  [1] K078A72527  (0.77)
+  [1] UK07BA72521  (0.77)
   Press any key for next image, 'q' to quit ...
 
 img4.jpg  →  1 plate(s) found
-  [1] P78EJ7683  (0.77)
+  [1] UP7BEJ7683  (0.77)
   Press any key for next image, 'q' to quit ...
 
 img5.jpg  →  1 plate(s) found
-  [1] L10CG4693  (0.72)
+  [1] DDL10CG4693  (0.72)
   Press any key for next image, 'q' to quit ...
 
 img6.jpg  →  1 plate(s) found
-  [1] 4514J8156  (0.76)
+  [1] K451MJ8156  (0.76)
   Press any key for next image, 'q' to quit ...
 
 img7.jpg  →  1 plate(s) found
-  [1] P3ZEC5A44  (0.78)
+  [1] UP3ZEC5A4J  (0.78)
   Press any key for next image, 'q' to quit ...
 
 img8.jpg  →  1 plate(s) found
-  [1] SOBER1643  (0.69)
+  [1] TSO8ER4643  (0.69)
   Press any key for next image, 'q' to quit ...
 
 img9.jpg  →  1 plate(s) found
-  [1] S01BZ2002  (0.81)
+  [1] AS01BZ2O02  (0.81)
   Press any key for next image, 'q' to quit ...
+
+Done.
 '''
