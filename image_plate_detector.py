@@ -5,12 +5,14 @@ import easyocr
 import sys
 from pathlib import Path
 
-# COnfig
+# Config 
 MODEL_PATH  = "models/best.onnx"
 TEST_DIR    = "test_images"
 CONF_THRESH = 0.4
 IOU_THRESH  = 0.45
 INPUT_SIZE  = (640, 640)
+SKIP_LEFT   = 0.20   # skip leftmost 20% of plate (IND badge)
+
 
 sess_opts = ort.SessionOptions()
 sess_opts.log_severity_level = 3
@@ -93,34 +95,21 @@ def postprocess(output, orig_w, orig_h, size=INPUT_SIZE):
     return results
 
 
-def preprocess_plate(crop):
-    h, w = crop.shape[:2]
-    if w < 200:
-        scale = 200 / w
-        crop = cv2.resize(crop, (int(w * scale), int(h * scale)),
-                          interpolation=cv2.INTER_CUBIC)
-    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-    # bilateral: removes noise but keeps character edges sharp
-    gray = cv2.bilateralFilter(gray, 9, 75, 75)
-    # CLAHE: local contrast enhancement — handles uneven plate lighting
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
-    gray = clahe.apply(gray)
-    return gray
-
-
 def read_plate(img_bgr, x1, y1, x2, y2):
     crop = img_bgr[y1:y2, x1:x2]
     if crop.size == 0:
         return ""
-    processed = preprocess_plate(crop)
+    # skip left portion to avoid IND badge / state emblem
+    w = crop.shape[1]
+    crop = crop[:, int(w * SKIP_LEFT):]
     results = reader.readtext(
-        processed,
+        crop,
         detail=0,
         allowlist="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
-        paragraph=True,    # merge nearby text into one string
-        text_threshold=0.7,  # raise to reduce false positives
+        paragraph=True,
+        text_threshold=0.7,
         low_text=0.4,
-        width_ths=0.8,     # merge chars close horizontally
+        width_ths=0.8,
     )
     return "".join(results).upper()
 
@@ -175,44 +164,42 @@ if __name__ == "__main__":
 Processing 10 image(s) from 'test_images' ...
 
 img1.jpg  →  1 plate(s) found
-  [1] INDIHR2OBA8H  (0.86)
+  [1] I2GBOBHU  (0.86)
   Press any key for next image, 'q' to quit ...
 
 img10.jpg  →  1 plate(s) found
-  [1] KLOZBF5OOO  (0.70)
+  [1] LO7BF5OOO  (0.70)
   Press any key for next image, 'q' to quit ...
 
 img2.jpg  →  1 plate(s) found
-  [1] K451J8156  (0.76)
+  [1] 4514J8156  (0.76)
   Press any key for next image, 'q' to quit ...
 
 img3.jpg  →  1 plate(s) found
-  [1] UK07B47252  (0.77)
+  [1] K078A72527  (0.77)
   Press any key for next image, 'q' to quit ...
 
 img4.jpg  →  1 plate(s) found
-  [1] UP78EJ7683  (0.77)
+  [1] P78EJ7683  (0.77)
   Press any key for next image, 'q' to quit ...
 
 img5.jpg  →  1 plate(s) found
-  [1] MDL10C6L693  (0.72)
+  [1] L10CG4693  (0.72)
   Press any key for next image, 'q' to quit ...
 
 img6.jpg  →  1 plate(s) found
-  [1] K451J8156  (0.76)
+  [1] 4514J8156  (0.76)
   Press any key for next image, 'q' to quit ...
 
 img7.jpg  →  1 plate(s) found
-  [1] EUP2ZEC5II1  (0.78)
+  [1] P3ZEC5A44  (0.78)
   Press any key for next image, 'q' to quit ...
 
 img8.jpg  →  1 plate(s) found
-  [1] INDTSOBERI643  (0.69)
+  [1] SOBER1643  (0.69)
   Press any key for next image, 'q' to quit ...
 
 img9.jpg  →  1 plate(s) found
-  [1] AS01BZ2002  (0.81)
+  [1] S01BZ2002  (0.81)
   Press any key for next image, 'q' to quit ...
-
-Done.
 '''
